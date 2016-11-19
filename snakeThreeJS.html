@@ -1,0 +1,657 @@
+<!doctype html>
+<!--
+Created using JS Bin
+http://jsbin.com
+
+Copyright (c) 2016 by kmui2 (http://jsbin.com/zehidas/1/edit)
+
+Released under the MIT license: http://jsbin.mit-license.org
+-->
+<meta name="robots" content="noindex">
+<html lang="en">
+<head>
+  <title>Snake using Three.js</title>
+  <meta charset="utf-8">
+</head>
+<body style="margin: 0;">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r79/three.js"></script>
+
+  <script>
+  /**
+ * All snake mechanics are by Kevin Mui https://github.com/kmui2 
+ * Orbit Controls function is by: 
+ * @author qiao / https://github.com/qiao
+ * @author mrdoob / http://mrdoob.com
+ * @author alteredq / http://alteredqualia.com/
+ * @author WestLangley / http://github.com/WestLangley
+ */
+
+THREE.OrbitControls = function ( object, domElement ) {
+
+	this.object = object;
+	this.domElement = ( domElement !== undefined ) ? domElement : document;
+
+	// API
+
+	this.enabled = true;
+
+	this.center = new THREE.Vector3();
+
+	this.userZoom = true;
+	this.userZoomSpeed = 1.0;
+
+	this.userRotate = true;
+	this.userRotateSpeed = 1.0;
+
+	this.userPan = true;
+	this.userPanSpeed = 2.0;
+
+	this.autoRotate = false;
+	this.autoRotateSpeed = 2.0; // 30 seconds per round when fps is 60
+
+	this.minPolarAngle = 0; // radians
+	this.maxPolarAngle = Math.PI; // radians
+
+	this.minDistance = 0;
+	this.maxDistance = Infinity;
+
+	// 65 /*A*/, 83 /*S*/, 68 /*D*/
+	this.keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40, ROTATE: 65, ZOOM: 83, PAN: 68 };
+
+	// internals
+
+	var scope = this;
+
+	var EPS = 0.000001;
+	var PIXELS_PER_ROUND = 1800;
+
+	var rotateStart = new THREE.Vector2();
+	var rotateEnd = new THREE.Vector2();
+	var rotateDelta = new THREE.Vector2();
+
+	var zoomStart = new THREE.Vector2();
+	var zoomEnd = new THREE.Vector2();
+	var zoomDelta = new THREE.Vector2();
+
+	var phiDelta = 0;
+	var thetaDelta = 0;
+	var scale = 1;
+
+	var lastPosition = new THREE.Vector3();
+
+	var STATE = { NONE: -1, ROTATE: 0, ZOOM: 1, PAN: 2 };
+	var state = STATE.NONE;
+
+	// events
+
+	var changeEvent = { type: 'change' };
+
+
+	this.rotateLeft = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		thetaDelta -= angle;
+
+	};
+
+	this.rotateRight = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		thetaDelta += angle;
+
+	};
+
+	this.rotateUp = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		phiDelta -= angle;
+
+	};
+
+	this.rotateDown = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		phiDelta += angle;
+
+	};
+
+	this.zoomIn = function ( zoomScale ) {
+
+		if ( zoomScale === undefined ) {
+
+			zoomScale = getZoomScale();
+
+		}
+
+		scale /= zoomScale;
+
+	};
+
+	this.zoomOut = function ( zoomScale ) {
+
+		if ( zoomScale === undefined ) {
+
+			zoomScale = getZoomScale();
+
+		}
+
+		scale *= zoomScale;
+
+	};
+
+	this.pan = function ( distance ) {
+
+		distance.transformDirection( this.object.matrix );
+		distance.multiplyScalar( scope.userPanSpeed );
+
+		this.object.position.add( distance );
+		this.center.add( distance );
+
+	};
+
+	this.update = function () {
+
+		var position = this.object.position;
+		var offset = position.clone().sub( this.center );
+
+		// angle from z-axis around y-axis
+
+		var theta = Math.atan2( offset.x, offset.z );
+
+		// angle from y-axis
+
+		var phi = Math.atan2( Math.sqrt( offset.x * offset.x + offset.z * offset.z ), offset.y );
+
+		if ( this.autoRotate ) {
+
+			this.rotateLeft( getAutoRotationAngle() );
+
+		}
+
+		theta += thetaDelta;
+		phi += phiDelta;
+
+		// restrict phi to be between desired limits
+		phi = Math.max( this.minPolarAngle, Math.min( this.maxPolarAngle, phi ) );
+
+		// restrict phi to be betwee EPS and PI-EPS
+		phi = Math.max( EPS, Math.min( Math.PI - EPS, phi ) );
+
+		var radius = offset.length() * scale;
+
+		// restrict radius to be between desired limits
+		radius = Math.max( this.minDistance, Math.min( this.maxDistance, radius ) );
+
+		offset.x = radius * Math.sin( phi ) * Math.sin( theta );
+		offset.y = radius * Math.cos( phi );
+		offset.z = radius * Math.sin( phi ) * Math.cos( theta );
+
+		position.copy( this.center ).add( offset );
+
+		this.object.lookAt( this.center );
+
+		thetaDelta = 0;
+		phiDelta = 0;
+		scale = 1;
+
+		if ( lastPosition.distanceTo( this.object.position ) > 0 ) {
+
+			this.dispatchEvent( changeEvent );
+
+			lastPosition.copy( this.object.position );
+
+		}
+
+	};
+
+
+	function getAutoRotationAngle() {
+
+		return 2 * Math.PI / 60 / 60 * scope.autoRotateSpeed;
+
+	}
+
+	function getZoomScale() {
+
+		return Math.pow( 0.95, scope.userZoomSpeed );
+
+	}
+
+	function onMouseDown( event ) {
+
+		if ( scope.enabled === false ) return;
+		if ( scope.userRotate === false ) return;
+
+		event.preventDefault();
+
+		if ( state === STATE.NONE )
+		{
+			if ( event.button === 0 )
+				state = STATE.ROTATE;
+			if ( event.button === 1 )
+				state = STATE.ZOOM;
+			if ( event.button === 2 )
+				state = STATE.PAN;
+		}
+		
+		
+		if ( state === STATE.ROTATE ) {
+
+			//state = STATE.ROTATE;
+
+			rotateStart.set( event.clientX, event.clientY );
+
+		} else if ( state === STATE.ZOOM ) {
+
+			//state = STATE.ZOOM;
+
+			zoomStart.set( event.clientX, event.clientY );
+
+		} else if ( state === STATE.PAN ) {
+
+			//state = STATE.PAN;
+
+		}
+
+		document.addEventListener( 'mousemove', onMouseMove, false );
+		document.addEventListener( 'mouseup', onMouseUp, false );
+
+	}
+
+	function onMouseMove( event ) {
+
+		if ( scope.enabled === false ) return;
+
+		event.preventDefault();
+
+		
+		
+		if ( state === STATE.ROTATE ) {
+
+			rotateEnd.set( event.clientX, event.clientY );
+			rotateDelta.subVectors( rotateEnd, rotateStart );
+
+			scope.rotateLeft( 2 * Math.PI * rotateDelta.x / PIXELS_PER_ROUND * scope.userRotateSpeed );
+			scope.rotateUp( 2 * Math.PI * rotateDelta.y / PIXELS_PER_ROUND * scope.userRotateSpeed );
+
+			rotateStart.copy( rotateEnd );
+
+		} else if ( state === STATE.ZOOM ) {
+
+			zoomEnd.set( event.clientX, event.clientY );
+			zoomDelta.subVectors( zoomEnd, zoomStart );
+
+			if ( zoomDelta.y > 0 ) {
+
+				scope.zoomIn();
+
+			} else {
+
+				scope.zoomOut();
+
+			}
+
+			zoomStart.copy( zoomEnd );
+
+		} else if ( state === STATE.PAN ) {
+
+			var movementX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+			var movementY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
+
+			scope.pan( new THREE.Vector3( - movementX, movementY, 0 ) );
+
+		}
+
+	}
+
+	function onMouseUp( event ) {
+
+		if ( scope.enabled === false ) return;
+		if ( scope.userRotate === false ) return;
+
+		document.removeEventListener( 'mousemove', onMouseMove, false );
+		document.removeEventListener( 'mouseup', onMouseUp, false );
+
+		state = STATE.NONE;
+
+	}
+
+	function onMouseWheel( event ) {
+
+		if ( scope.enabled === false ) return;
+		if ( scope.userZoom === false ) return;
+
+		var delta = 0;
+
+		if ( event.wheelDelta ) { // WebKit / Opera / Explorer 9
+
+			delta = event.wheelDelta;
+
+		} else if ( event.detail ) { // Firefox
+
+			delta = - event.detail;
+
+		}
+
+		if ( delta > 0 ) {
+
+			scope.zoomOut();
+
+		} else {
+
+			scope.zoomIn();
+
+		}
+
+	}
+
+	function onKeyDown( event ) {
+
+		if ( scope.enabled === false ) return;
+		if ( scope.userPan === false ) return;
+
+		switch ( event.keyCode ) {
+
+			/*case scope.keys.UP:
+				scope.pan( new THREE.Vector3( 0, 1, 0 ) );
+				break;
+			case scope.keys.BOTTOM:
+				scope.pan( new THREE.Vector3( 0, - 1, 0 ) );
+				break;
+			case scope.keys.LEFT:
+				scope.pan( new THREE.Vector3( - 1, 0, 0 ) );
+				break;
+			case scope.keys.RIGHT:
+				scope.pan( new THREE.Vector3( 1, 0, 0 ) );
+				break;
+			*/
+			case scope.keys.ROTATE:
+				state = STATE.ROTATE;
+				break;
+			case scope.keys.ZOOM:
+				state = STATE.ZOOM;
+				break;
+			case scope.keys.PAN:
+				state = STATE.PAN;
+				break;
+				
+		}
+
+	}
+	
+	function onKeyUp( event ) {
+
+		switch ( event.keyCode ) {
+
+			case scope.keys.ROTATE:
+			case scope.keys.ZOOM:
+			case scope.keys.PAN:
+				state = STATE.NONE;
+				break;
+		}
+
+	}
+
+	this.domElement.addEventListener( 'contextmenu', function ( event ) { event.preventDefault(); }, false );
+	this.domElement.addEventListener( 'mousedown', onMouseDown, false );
+	this.domElement.addEventListener( 'mousewheel', onMouseWheel, false );
+	this.domElement.addEventListener( 'DOMMouseScroll', onMouseWheel, false ); // firefox
+	window.addEventListener( 'keydown', onKeyDown, false );
+	window.addEventListener( 'keyup', onKeyUp, false );
+
+};
+
+THREE.OrbitControls.prototype = Object.create( THREE.EventDispatcher.prototype );
+
+  </script>
+
+<script id="jsbin-javascript">
+// Set up the scene, camera, and renderer as global variables.
+    var scene, camera, renderer, apple, bodyMat, bodyGeo;
+    
+    var counter = 0;
+    var alerted = false;
+    var up = true;
+    var down = false;
+    var right = false;
+    var left = false;
+    var bodyObj =[];
+    var bodyCoord = [[0,-3],[0,-2],[0,-1],[0,0],[0,1],[0,2]];
+    var headCoord = bodyCoord[0];
+    var moveStack = [[0,-1],[0,-1],[0,-1],[0,-1],[0,-1]];
+    //var appleCoord = [Math.floor((Math.random()-0.5)*20),Math.floor((Math.random()-0.5)*20)];
+    var appleCoord = [0,-5]
+
+    init();
+    animate();
+
+    // Sets up the scene.
+    function init() {
+
+      // Create the scene and set the scene size.
+      scene = new THREE.Scene();
+      var WIDTH = window.innerWidth,
+          HEIGHT = window.innerHeight;
+
+      // Create a renderer and add it to the DOM.
+      renderer = new THREE.WebGLRenderer({antialias:true});
+      renderer.setSize(WIDTH, HEIGHT);
+      document.body.appendChild(renderer.domElement);
+
+      // Create a camera, zoom it out from the model a bit, and add it to the scene.
+      camera = new THREE.PerspectiveCamera(45, WIDTH / HEIGHT, 0.1, 20000);
+      camera.position.set(0,30,0);
+      scene.add(camera);
+
+      // Create an event listener that resizes the renderer with the browser window.
+      window.addEventListener('resize', function() {
+        var WIDTH = window.innerWidth,
+            HEIGHT = window.innerHeight;
+        renderer.setSize(WIDTH, HEIGHT);
+        camera.aspect = WIDTH / HEIGHT;
+        camera.updateProjectionMatrix();
+      });
+
+
+      // Create a light, set its position, and add it to the scene.
+      var light = new THREE.PointLight(0xffffff);
+      light.position.set(-100,200,100);
+      scene.add(light);
+      
+      bodyMat = new THREE.MeshLambertMaterial( {color: 0xffff00} );
+      bodyGeo = new THREE.SphereGeometry( 0.5, 32, 32 );
+      //body
+      for (var i = 0; i < bodyCoord.length; i++) {
+        var sphere = new THREE.Mesh( bodyGeo, bodyMat );
+        scene.add( sphere );
+        sphere.translateX(bodyCoord[i][0]);
+        sphere.translateZ(bodyCoord[i][1]);
+        bodyObj.push(sphere);
+      }
+      
+      //apple
+       var geometry = new THREE.SphereGeometry( 0.5, 32, 32 );
+       var material = new THREE.MeshLambertMaterial( {color: 0xff0000} );
+       apple = new THREE.Mesh( geometry, material );
+       scene.add( apple );
+       apple.translateX(appleCoord[0]);
+       apple.translateZ(appleCoord[1]);
+      
+      //edges
+      var edges = [[-11,0],[0,11],[0,-11],[11,0]];
+      var edgesRot = [0,90,90,0];
+      for (var i = 0; i<edges.length;i++) {
+        var geometry = new THREE.BoxGeometry( 0.5, 32, 32 );
+        var material = new THREE.MeshLambertMaterial( {color: 0x00ff00} );
+        var edge = new THREE.Mesh( geometry, material );
+        scene.add( edge );
+        edge.translateX(edges[i][0]);
+        edge.translateZ(edges[i][1]);
+        edge.scale.set(1,0.01,1);
+        edge.rotateY(edgesRot[i]/180*Math.PI)
+      }
+        
+      // Add OrbitControls so that we can pan around with the mouse.
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      
+    }
+
+
+    // Renders the scene and updates the render as needed.
+    function animate() {
+
+      // Read more about requestAnimationFrame at http://www.paulirish.com/2011/requestanimationframe-for-smart-animating/
+      requestAnimationFrame(animate);
+        
+     headCoord = bodyCoord[0];
+      if (!gameOver()){
+        counter+=2;
+      
+          if(counter%50 === 0) {
+            if (down) {
+              moveStack.push([0,1]);
+            }
+            else if (up){
+              moveStack.push([0,-1]);
+            }
+            else if (right){
+              moveStack.push([1,0]);
+            }
+            else if (left){
+              moveStack.push([-1,0]);
+            }
+            var lastCoord = [bodyCoord[bodyCoord.length-1][0],bodyCoord[bodyCoord.length-1][1]];
+            for(var i = 0; i<bodyObj.length;i++) {
+              //console.log("["+"["+moveStack[i][0]+"]"+"["+moveStack[i][1]+"]"+"]");
+              //console.log("up=" +up+ " down=" + down+ " right="+right+ " left "+left)
+              bodyObj[bodyObj.length-1-i].translateZ(moveStack[i][1]);
+              bodyObj[bodyObj.length-1-i].translateX(moveStack[i][0]);
+              bodyCoord[bodyCoord.length-1-i][0]+=moveStack[i][0];
+              bodyCoord[bodyCoord.length-1-i][1]+=moveStack[i][1];
+            }
+            if (headCoord[0] == appleCoord[0] && headCoord[1] == appleCoord[1]) {
+                var sphere = new THREE.Mesh( bodyGeo, bodyMat );
+                 scene.add( sphere );
+                 sphere.translateX(lastCoord[0]);
+                 sphere.translateZ(lastCoord[1]);
+                 bodyObj.push(sphere);
+                 bodyCoord.push([lastCoord[0],lastCoord[1]])
+              
+                var newAppleCoord = [Math.floor((Math.random()-0.5)*20),Math.floor((Math.random()-0.5)*20)];
+                var diff = [newAppleCoord[0]-appleCoord[0],newAppleCoord[1]-appleCoord[1]];
+                appleCoord = newAppleCoord;
+                apple.translateX(diff[0]);
+                apple.translateZ(diff[1]);
+
+            }
+            else {
+              moveStack.shift();
+            }
+          }
+      }
+        
+      // Render the scene.
+      renderer.render(scene, camera);
+      controls.update();
+    }
+
+function gameOver() {
+    if (headCoord[0] > 10 || headCoord[1] > 10)
+        return true;
+    if (headCoord[0] < -10 || headCoord[1] < -10)
+        return true;
+    return false;
+}
+
+window.addEventListener('keydown', function(e) {
+      console.log("hello)");
+			//====================
+			//	THE W KEY
+			//====================
+			if (e.keyCode == 87) {
+              if(!down) {
+                  up = true;
+                  down = false;
+                  right = false;
+                  left = false;
+              }
+            }
+
+			//====================
+			//	THE S KEY
+			//====================
+			if (e.keyCode == 83) {
+              if(!up) {
+                  up = false;
+                  down = true;
+                  right = false;
+                  left = false;
+              }
+            }
+
+			//====================
+			//	THE A KEY
+			//====================
+			if (e.keyCode == 65) {
+              if(!right) {
+                  up = false;
+                  down = false;
+                  right = false;
+                  left = true;
+              }
+            }
+
+			//====================
+			//	THE D KEY
+			//====================
+			if (e.keyCode == 68) {
+              if(!left) {
+                  up = false;
+                  down = false;
+                  right = true;
+                  left = false;
+              }
+            }
+          //====================
+			//	THE Shift KEY
+			//====================
+			if (e.keyCode == 16) {
+              if(pattern)
+                pattern=false;
+              else
+                pattern=true;
+            }//====================
+			//	THE Control KEY
+			//====================
+			if (e.keyCode == 17) {
+    body = [[6,1],[6,2],[6,3],[6,4],[6,5],[6,6]];
+  headPos = body[body.length-1];
+  up=true
+  down=false
+  right=false
+  left=false
+            }
+    }, false);
+</script>
+</body>
+</html>
